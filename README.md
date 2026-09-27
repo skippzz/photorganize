@@ -32,7 +32,7 @@ pip install -r requirements.txt          # Python 3.9+
 python photorganize.py all ~/Pictures/Wedding \
   --drive-folder "https://drive.google.com/drive/folders/XXXX" \
   --api-key "AIza..." \
-  --passphrase "portakal" --title "Our Wedding"
+  --passphrase "portakal2026" --title "Our Wedding"
 ```
 
 4000 photos take about 10–20 minutes on a laptop CPU. The scan is **resumable**: Ctrl-C and rerun, and finished photos are skipped. Everything intermediate goes to `indexer/work/`, which is git-ignored and **contains faces, so don't publish it**.
@@ -58,7 +58,7 @@ id,name,photos
 9,-,15        ← "-" hides this ID (waiter, stranger)
 ```
 
-Then run `python photorganize.py build --passphrase portakal`, then commit and push. Guests can also tap **"I know who this is"** on an unnamed `#ID` to send you a name.
+Then run `python photorganize.py build --passphrase portakal2026`, then commit and push. Guests can also tap **"I know who this is"** on an unnamed `#ID` to send you a name.
 
 ## 5. Publish
 
