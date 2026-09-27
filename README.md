@@ -82,3 +82,7 @@ Commit `docs/data/index.enc`. Then on GitHub: **Settings → Pages → Deploy fr
 - Face models: InsightFace `buffalo_s` (SCRFD-500M detector + ArcFace MobileFaceNet, 16 MB), run with onnxruntime in Python and onnxruntime-web in the browser, with the same preprocessing in both. The models are for **non-commercial use** under the InsightFace license, which is fine for a personal wedding.
 - Grouping: Chinese Whispers on a k-NN cosine graph, then a merge pass on similar group centroids.
 - No build step, no backend. It's static files.
+
+## Demo
+
+`docs/data/demo.enc` is a small demo made from public-domain Obama/Biden photos, which are hosted in `docs/demo/`. The app tries every index in `INDEXES` (`docs/js/app.js`), and the passphrase decides which one opens, so the demo and the real wedding index can sit side by side. A photo "ID" containing `/` is treated as a URL relative to the site instead of a Drive file ID. Delete `docs/demo/` and `docs/data/demo.enc` to remove the demo.

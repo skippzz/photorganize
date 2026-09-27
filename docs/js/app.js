@@ -27,8 +27,12 @@ function h(tag, attrs = {}, ...kids) {
 }
 
 const label = (p) => p.name || `#${p.id}`;
-const thumb = (id, w) => `https://drive.google.com/thumbnail?id=${id}&sz=w${w}`;
-const thumbAlt = (id, w) => `https://lh3.googleusercontent.com/d/${id}=w${w}`;
+// Photo "id" is a Drive file ID, or a relative URL (contains '/') for photos hosted with the site (demo).
+const isLocal = (id) => id.includes('/');
+const thumb = (id, w) => (isLocal(id) ? id : `https://drive.google.com/thumbnail?id=${id}&sz=w${w}`);
+const thumbAlt = (id, w) => (isLocal(id) ? id : `https://lh3.googleusercontent.com/d/${id}=w${w}`);
+const downloadUrl = (id) => (isLocal(id) ? id : `https://drive.usercontent.google.com/download?id=${id}&export=download`);
+const viewUrl = (id) => (isLocal(id) ? id : `https://drive.google.com/file/d/${id}/view`);
 
 function img(id, w, attrs = {}) {
   return h('img', {
@@ -77,11 +81,24 @@ function prepare(data) {
   document.title = data.title;
 }
 
+// Every published index is tried; the passphrase picks which one opens (e.g. the real one vs the demo).
+const INDEXES = ['data/index.enc', 'data/demo.enc'];
+
 async function unlock(pass) {
-  const res = await fetch('data/index.enc', { cache: 'no-cache' });
-  if (!res.ok) throw new Error('No index published yet (data/index.enc missing)');
-  prepare(await decryptIndex(await res.arrayBuffer(), pass));
-  store.set('pass', pass);
+  let found = 0;
+  for (const url of INDEXES) {
+    const res = await fetch(url, { cache: 'no-cache' }).catch(() => null);
+    if (!res?.ok) continue;
+    found++;
+    try {
+      prepare(await decryptIndex(await res.arrayBuffer(), pass));
+      store.set('pass', pass);
+      return;
+    } catch (ex) {
+      if (ex.message !== 'Wrong passphrase') throw ex;
+    }
+  }
+  throw new Error(found ? 'Wrong passphrase' : 'No index published yet (data/index.enc missing)');
 }
 
 function match(emb) {
@@ -248,8 +265,8 @@ function drawLightbox() {
     h('div', { class: 'lb-top' },
       h('span', { class: 'muted' }, `${i + 1} / ${list.length}`),
       h('span', { class: 'grow' }),
-      h('a', { class: 'lb-btn', href: `https://drive.usercontent.google.com/download?id=${id}&export=download`, title: 'Download original', 'aria-label': 'Download original' }, '⬇'),
-      h('a', { class: 'lb-btn', href: `https://drive.google.com/file/d/${id}/view`, target: '_blank', rel: 'noopener', title: 'Open in Google Drive (save to your Drive)', 'aria-label': 'Open in Google Drive' }, '↗'),
+      h('a', { class: 'lb-btn', href: downloadUrl(id), download: isLocal(id) ? '' : null, title: 'Download original', 'aria-label': 'Download original' }, '⬇'),
+      h('a', { class: 'lb-btn', href: viewUrl(id), target: '_blank', rel: 'noopener', title: 'Open in Google Drive (save to your Drive)', 'aria-label': 'Open in Google Drive' }, '↗'),
       h('button', { class: 'lb-btn', onclick: closeLightbox, 'aria-label': 'Close' }, '✕')),
     h('div', { class: 'lb-stage' },
       h('button', { class: 'lb-nav prev', onclick: () => step(-1), 'aria-label': 'Previous', disabled: i === 0 }, '‹'),
@@ -257,6 +274,7 @@ function drawLightbox() {
       h('button', { class: 'lb-nav next', onclick: () => step(1), 'aria-label': 'Next', disabled: i === list.length - 1 }, '›')),
     h('div', { class: 'lb-people' }, ...who.map((p) => h('a', { class: 'chip', href: `#/p/${p.id}`, onclick: closeLightbox }, avatar(p, 'xs'), label(p)))),
   );
+  resetZoom();
   // Preload neighbours.
   for (const d of [-1, 1]) { const n = list[i + d]; if (n != null && idx.photos[n][1]) new Image().src = thumb(idx.photos[n][1], 2000); }
 }
@@ -280,14 +298,98 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') step(-1);
   if (e.key === 'ArrowRight') step(1);
 });
-let touchX = null;
-$lb.addEventListener('touchstart', (e) => { touchX = e.touches[0].clientX; }, { passive: true });
-$lb.addEventListener('touchend', (e) => {
-  if (touchX == null) return;
-  const dx = e.changedTouches[0].clientX - touchX;
-  if (Math.abs(dx) > 50) step(dx < 0 ? 1 : -1);
-  touchX = null;
+
+// Photo zoom/pan/swipe inside the lightbox (page zoom is disabled, so photos zoom here instead).
+const zoom = { s: 1, x: 0, y: 0 };
+const ptrs = new Map();
+let gesture = null;
+let lastTap = { t: 0, x: 0, y: 0 };
+
+function applyZoom(animate) {
+  const el = $lb.querySelector('.lb-img');
+  if (!el) return;
+  el.style.transition = animate ? 'transform .18s ease-out' : 'none';
+  el.style.transform = `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})`;
+  $lb.classList.toggle('zoomed', zoom.s > 1);
+}
+
+function resetZoom() { Object.assign(zoom, { s: 1, x: 0, y: 0 }); applyZoom(false); }
+
+// Zoom to scale s keeping screen point (px, py) fixed.
+function zoomAt(s, px, py) {
+  const r = $lb.querySelector('.lb-stage').getBoundingClientRect();
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  s = Math.min(5, Math.max(1, s));
+  const k = s / zoom.s;
+  zoom.x = (px - cx) - ((px - cx) - zoom.x) * k;
+  zoom.y = (py - cy) - ((py - cy) - zoom.y) * k;
+  zoom.s = s;
+  if (s === 1) zoom.x = zoom.y = 0;
+}
+
+$lb.addEventListener('pointerdown', (e) => {
+  if (!e.target.closest('.lb-stage') || e.target.closest('button')) return;
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  e.target.setPointerCapture?.(e.pointerId);
+  const pts = [...ptrs.values()];
+  if (pts.length === 1) gesture = { type: 'pan', x0: e.clientX, y0: e.clientY, lx: e.clientX, ly: e.clientY, t0: Date.now() };
+  else if (pts.length === 2) {
+    const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    gesture = { type: 'pinch', d0: d, s0: zoom.s, mx: (pts[0].x + pts[1].x) / 2, my: (pts[0].y + pts[1].y) / 2 };
+  }
 });
+
+$lb.addEventListener('pointermove', (e) => {
+  if (!ptrs.has(e.pointerId) || !gesture) return;
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  const pts = [...ptrs.values()];
+  if (gesture.type === 'pinch' && pts.length === 2) {
+    const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    const mx = (pts[0].x + pts[1].x) / 2, my = (pts[0].y + pts[1].y) / 2;
+    zoom.x += mx - gesture.mx;
+    zoom.y += my - gesture.my;
+    gesture.mx = mx; gesture.my = my;
+    zoomAt(gesture.s0 * d / gesture.d0, mx, my);
+    applyZoom(false);
+  } else if (gesture.type === 'pan' && zoom.s > 1) {
+    zoom.x += e.clientX - gesture.lx;
+    zoom.y += e.clientY - gesture.ly;
+    applyZoom(false);
+  }
+  if (gesture.type === 'pan') { gesture.lx = e.clientX; gesture.ly = e.clientY; }
+});
+
+function endPointer(e) {
+  if (!ptrs.delete(e.pointerId) || !gesture) return;
+  if (gesture.type === 'pinch') {
+    if (ptrs.size === 0) { if (zoom.s < 1.05) resetZoom(); gesture = null; }
+    else gesture = null; // one finger left: ignore until lifted
+    return;
+  }
+  const dx = e.clientX - gesture.x0, dy = e.clientY - gesture.y0;
+  const quick = Date.now() - gesture.t0 < 400;
+  gesture = null;
+  if (zoom.s === 1 && quick && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) { step(dx < 0 ? 1 : -1); return; }
+  if (Math.hypot(dx, dy) < 10) {
+    const now = Date.now();
+    if (now - lastTap.t < 300 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30) {
+      zoomAt(zoom.s > 1 ? 1 : 2.5, e.clientX, e.clientY);
+      applyZoom(true);
+      lastTap.t = 0;
+    } else lastTap = { t: now, x: e.clientX, y: e.clientY };
+  }
+}
+$lb.addEventListener('pointerup', endPointer);
+$lb.addEventListener('pointercancel', endPointer);
+$lb.addEventListener('wheel', (e) => {
+  if (!e.target.closest('.lb-stage')) return;
+  e.preventDefault();
+  zoomAt(zoom.s * Math.exp(-e.deltaY * 0.002), e.clientX, e.clientY);
+  applyZoom(false);
+}, { passive: false });
+
+// iOS Safari ignores user-scalable=no; block its page pinch gestures explicitly.
+for (const ev of ['gesturestart', 'gesturechange']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
 
 // ---------------------------------------------------------------- selfie
 
