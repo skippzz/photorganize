@@ -37,7 +37,13 @@ const viewUrl = (id) => (isLocal(id) ? id : `https://drive.google.com/file/d/${i
 function img(id, w, attrs = {}) {
   return h('img', {
     src: thumb(id, w), loading: 'lazy', decoding: 'async', alt: '', referrerpolicy: 'no-referrer', ...attrs,
-    onerror(e) { if (!e.target.dataset.alt) { e.target.dataset.alt = 1; e.target.src = thumbAlt(id, w); } },
+    onerror(e) {
+      const el = e.target;
+      if (!el.dataset.alt) { el.dataset.alt = 1; el.src = thumbAlt(id, w); return; }
+      // Both URLs failed: the photo was removed from Drive since the index was built.
+      if (el.closest('.cell')) el.closest('.cell').hidden = true;
+      else if (el.classList.contains('lb-img')) el.replaceWith(h('p', { class: 'muted' }, 'Bu fotoğraf kaldırılmış.'));
+    },
   });
 }
 
@@ -49,6 +55,121 @@ function toast(msg) {
 
 function avatar(p, size = '') {
   return h('img', { class: `avatar ${size}`, src: p.cover, alt: '' });
+}
+
+// Bottom sheet / dialog; tap outside to close.
+function sheet(...kids) {
+  const close = () => ov.remove();
+  const ov = h('div', { class: 'sheet-bg', onclick(e) { if (e.target === ov) close(); } },
+    h('div', { class: 'card sheet', role: 'dialog' }, ...kids));
+  document.body.append(ov);
+  return close;
+}
+
+// ---------------------------------------------------------------- wedding extras (index.wedding, optional)
+
+const couple = () => {
+  const w = idx.wedding;
+  if (!w?.couple_ids) return null;
+  const ps = w.couple_ids.map((i) => byId.get(i));
+  return ps.every(Boolean) && ps[0] !== ps[1] ? ps : null;
+};
+const coupleName = () => idx.wedding.couple?.join(' & ') || '';
+
+function marriedFor(date) {
+  const d0 = new Date(`${date}T00:00:00`);
+  const now = new Date();
+  const days = Math.floor((now - d0) / 864e5);
+  if (days < 0) return `Düğüne ${-days} gün kaldı`;
+  if (days === 0) return 'Bugün evlendiler';
+  if (days < 60) return `${days} gündür evliler`;
+  const months = (now.getFullYear() - d0.getFullYear()) * 12 + now.getMonth() - d0.getMonth() - (now.getDate() < d0.getDate());
+  return months < 24 ? `${months} aydır evliler` : `${Math.floor(months / 12)} yıldır evliler`;
+}
+
+function celebrate() {
+  const w = idx.wedding;
+  if (!w?.couple) return;
+  const cp = couple();
+  const canvas = h('canvas', { class: 'confetti', 'aria-hidden': 'true' });
+  let stop = () => {};
+  const close = () => { stop(); ov.classList.add('out'); setTimeout(() => ov.remove(), 250); };
+  const ov = h('div', { class: 'celebrate', onclick(e) { if (e.target === ov || e.target === canvas) close(); } },
+    canvas,
+    h('div', { class: 'card celebrate-card', role: 'dialog', 'aria-label': coupleName() },
+      cp ? h('div', { class: 'duo' }, avatar(cp[0], 'lg'), h('span', { class: 'ring' }, '💍'), avatar(cp[1], 'lg')) : h('div', { class: 'ring big-ring' }, '💍'),
+      h('div', { class: 'celebrate-names' }, coupleName()),
+      w.message ? h('p', { class: 'celebrate-msg' }, w.message) : '',
+      w.from ? h('p', { class: 'muted' }, `— sevgiyle, ${w.from}`) : '',
+      h('button', { class: 'primary', onclick: close }, 'Fotoğraflara geç')));
+  document.body.append(ov);
+  stop = confetti(canvas);
+}
+
+// Falling confetti + hearts for a few seconds; nothing if the viewer prefers reduced motion.
+function confetti(canvas) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return () => {};
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const size = () => { canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr; };
+  size();
+  addEventListener('resize', size);
+  const colors = ['#b5654a', '#d98b6f', '#e8c07d', '#f3e3d3', '#8fb3a0', '#ffffff'];
+  const bits = [];
+  const add = (n, spread) => {
+    for (let i = 0; i < n; i++) {
+      bits.push({
+        x: Math.random() * innerWidth, y: -20 - Math.random() * spread, vx: (Math.random() - 0.5) * 1.5, vy: 1.6 + Math.random() * 2.4,
+        a: Math.random() * 6.28, va: (Math.random() - 0.5) * 0.2, w: 6 + Math.random() * 6, h: 9 + Math.random() * 8,
+        c: colors[(Math.random() * colors.length) | 0], heart: Math.random() < 0.18,
+      });
+    }
+  };
+  add(170, innerHeight * 0.6);
+  const t0 = performance.now();
+  let raf;
+  const tick = (t) => {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    for (const b of bits) {
+      b.x += b.vx + Math.sin(t / 500 + b.a) * 0.6;
+      b.y += b.vy;
+      b.a += b.va;
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(b.a);
+      ctx.fillStyle = b.c;
+      if (b.heart) { ctx.font = `${b.h + 6}px serif`; ctx.fillText('♥', -b.w / 2, b.h / 2); }
+      else ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h * Math.abs(Math.cos(b.a)));
+      ctx.restore();
+    }
+    for (let i = bits.length - 1; i >= 0; i--) if (bits[i].y > innerHeight + 30) bits.splice(i, 1);
+    if (t - t0 < 2500) add(3, 40);
+    if (bits.length) raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+  return () => { cancelAnimationFrame(raf); removeEventListener('resize', size); };
+}
+
+// Show the celebration once per device per index build; manual unlock always shows it.
+function maybeCelebrate(force) {
+  if (!idx.wedding?.couple) return;
+  if (!force && store.get('celebrated') === idx.created) return;
+  store.set('celebrated', idx.created);
+  celebrate();
+}
+
+// Who shows up in the same photos as p most often.
+function companions(p, k = 3) {
+  const c = new Map();
+  for (const pi of p.photos) for (const o of photoPeople[pi]) if (o !== p) c.set(o, (c.get(o) || 0) + 1);
+  return [...c].sort((a, b) => b[1] - a[1]).slice(0, k);
+}
+
+function shuffle() {
+  const list = idx.photos.map((_, i) => i).filter((i) => idx.photos[i][1]);
+  for (let i = list.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [list[i], list[j]] = [list[j], list[i]]; }
+  if (list.length) lightbox(list, 0);
 }
 
 function personCard(p) {
@@ -127,7 +248,8 @@ function viewLock(err) {
       btn.textContent = 'Unlocking…';
       try {
         await unlock(input.value.trim());
-        route();
+        await route();
+        maybeCelebrate(true);
       } catch (ex) {
         msg.textContent = ex.message;
         btn.disabled = false;
@@ -141,7 +263,15 @@ function viewLock(err) {
 function viewHome() {
   const me = byId.get(+store.get('me'));
   const linked = idx.photos.filter((p) => p[1]).length;
+  const w = idx.wedding;
+  const cp = couple();
+  const other = new Set(cp?.[1].photos);
+  const together = cp ? cp[0].photos.filter((x) => other.has(x)).length : 0;
   $view.replaceChildren(
+    w?.couple && w.date ? h('button', { class: 'married', onclick: celebrate, title: 'Kutlamayı tekrar oynat' }, `💍 ${coupleName()} · ${marriedFor(w.date)}`) : '',
+    cp ? h('a', { class: 'card action couple', href: `#/p/${cp[0].id}?with=${cp[1].id}` },
+      h('span', { class: 'duo sm' }, avatar(cp[0]), avatar(cp[1])),
+      h('div', {}, h('div', { class: 'big' }, coupleName()), h('div', { class: 'muted' }, `Birlikte ${together} fotoğraf`))) : '',
     me ? h('a', { class: 'card me', href: `#/p/${me.id}` }, avatar(me, 'lg'),
       h('div', {}, h('div', { class: 'muted' }, 'Your photos'), h('div', { class: 'big' }, label(me)), h('div', { class: 'muted' }, `${me.n} photos`))) : '',
     h('a', { class: 'card action', href: '#/selfie' }, h('span', { class: 'icon' }, '🤳'),
@@ -150,6 +280,8 @@ function viewHome() {
       h('div', {}, h('div', { class: 'big' }, 'Browse people'), h('div', { class: 'muted' }, `${idx.people.filter((p) => p.name).length} named, ${idx.people.length} total`))),
     h('a', { class: 'card action', href: '#/all' }, h('span', { class: 'icon' }, '🖼️'),
       h('div', {}, h('div', { class: 'big' }, 'All photos'), h('div', { class: 'muted' }, `${linked} photos`))),
+    h('button', { class: 'card action', onclick: shuffle }, h('span', { class: 'icon' }, '🎲'),
+      h('div', {}, h('div', { class: 'big' }, 'Beni şaşırt'), h('div', { class: 'muted' }, 'Rastgele fotoğraflar, kaydırdıkça yenisi gelir.'))),
     h('p', { class: 'foot' }, h('button', { class: 'link', onclick() { store.set('pass', null); store.set('me', null); idx = null; location.hash = ''; route(); } }, 'Lock')),
   );
 }
@@ -204,6 +336,7 @@ function viewPerson(id, withIds) {
           isMe ? h('span', { class: 'pill' }, 'This is you')
             : h('button', { class: 'small', onclick() { store.set('me', p.id); toast('Saved as you'); viewPerson(id, withIds); } }, 'This is me'),
           h('button', { class: 'small', onclick: () => suggestName(p) }, p.name ? 'Wrong name?' : 'I know who this is')))),
+    others.length ? '' : stats(p, isMe),
     h('div', { class: 'filters' },
       ...others.map((o) => h('a', { class: 'chip', href: `#/p/${p.id}${withIds.length > 1 ? `?with=${withIds.filter((i) => i !== o.id).join(',')}` : ''}` }, avatar(o, 'xs'), label(o), ' ×')),
       addSel),
@@ -211,12 +344,42 @@ function viewPerson(id, withIds) {
   );
 }
 
-async function suggestName(p) {
-  const text = `${idx.title}: person #${p.id}${p.name ? ` (now "${p.name}")` : ''} is: `;
-  try {
-    if (navigator.share) await navigator.share({ text });
-    else { await navigator.clipboard.writeText(text); toast('Copied. Send it to the couple!'); }
-  } catch { /* cancelled */ }
+function stats(p, isMe) {
+  const top = companions(p);
+  if (!top.length) return '';
+  return h('div', { class: 'stats' },
+    h('div', { class: 'muted' }, isMe ? `Sen ${p.n} fotoğraftasın! En çok birlikte olduğun kişiler:` : 'En çok birlikte:'),
+    h('div', { class: 'row' }, ...top.map(([o, n]) => h('a', { class: 'chip', href: `#/p/${p.id}?with=${o.id}` }, avatar(o, 'xs'), `${label(o)} · ${n}`))));
+}
+
+// "I know who this is": guest types the name, picks who to tell, gets a ready WhatsApp message.
+function suggestName(p) {
+  const to = idx.wedding?.contacts?.length ? idx.wedding.contacts : [null];
+  const link = `${location.origin}${location.pathname}#/p/${p.id}`;
+  const name = h('input', { type: 'text', placeholder: 'Adı (ve soyadı)', autocomplete: 'off', enterkeyhint: 'done', value: '' });
+  const who = h('div', { class: 'row' });
+  const out = h('div', {});
+  const compose = (rcpt) => {
+    const n = name.value.trim();
+    if (!n) { name.focus(); toast('Önce ismi yaz'); return; }
+    const text = `${rcpt ? `Selam ${rcpt}! ` : ''}Düğün fotoğraflarındaki #${p.id} numaralı kişi${p.name ? ` (şu an "${p.name}" yazıyor)` : ''}: ${n} 🙂\n${link}`;
+    for (const b of who.children) b.classList.toggle('primary', b.dataset.to === String(rcpt));
+    out.replaceChildren(
+      h('div', { class: 'bubble' }, text),
+      h('div', { class: 'row' },
+        h('a', { class: 'btn primary', href: `https://wa.me/?text=${encodeURIComponent(text)}`, target: '_blank', rel: 'noopener' }, 'WhatsApp’ta gönder'),
+        h('button', { async onclick() { try { await navigator.clipboard.writeText(text); toast('Kopyalandı'); } catch { toast('Kopyalanamadı'); } } }, 'Kopyala')),
+      h('p', { class: 'muted' }, rcpt ? `WhatsApp açılınca sohbetlerden seç: ${rcpt}` : 'WhatsApp açılınca kişiyi seç.'));
+  };
+  who.append(...to.map((r) => h('button', { class: 'small', 'data-to': String(r), onclick: () => compose(r) }, r || 'Mesajı hazırla')));
+  sheet(
+    h('div', { class: 'bar' }, avatar(p), h('div', { class: 'grow' }, h('div', { class: 'big' }, p.name ? 'Yanlış isim mi?' : 'Bu kim?'), h('div', { class: 'muted' }, label(p)))),
+    name,
+    h('div', { class: 'muted' }, to[0] ? 'Kime yazalım?' : ''),
+    who,
+    out,
+  );
+  name.focus();
 }
 
 function viewAll() {
@@ -293,6 +456,7 @@ function closeLightbox() {
 }
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.querySelectorAll('.sheet-bg').forEach((s) => s.remove());
   if (!lbState) return;
   if (e.key === 'Escape') closeLightbox();
   if (e.key === 'ArrowLeft') step(-1);
@@ -475,11 +639,13 @@ function showMatches(el, ranked) {
 async function route() {
   stopCamera();
   if (lbState) closeLightbox();
+  document.querySelectorAll('.sheet-bg').forEach((s) => s.remove());
   if (!idx) {
     const saved = store.get('pass');
     if (saved) {
       $view.replaceChildren(h('p', { class: 'muted center' }, 'Opening…'));
       try { await unlock(saved); } catch (ex) { store.set('pass', null); return viewLock(ex.message === 'Wrong passphrase' ? 'Passphrase changed, enter the new one.' : ex.message); }
+      queueMicrotask(() => maybeCelebrate(false));
     } else return viewLock();
   }
   const [path, query] = location.hash.replace(/^#/, '').split('?');

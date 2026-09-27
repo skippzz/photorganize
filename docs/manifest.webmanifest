@@ -1,6 +1,6 @@
 {
   "name": "Wedding Photos",
-  "short_name": "Photos",
+  "short_name": "Wedding Photos",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -434,7 +434,7 @@ def list_drive(folder, key, prefix=""):
 def cmd_drive(a):
     work = Path(a.work)
     if a.rclone_json:  # rclone lsjson -R remote:folder > listing.json
-        listing = {e["Path"]: e["ID"] for e in json.loads(Path(a.rclone_json).read_text()) if not e.get("IsDir")}
+        listing = {e["Path"]: e["ID"] for e in json.loads(Path(a.rclone_json).read_text(encoding="utf-8-sig")) if not e.get("IsDir")}
     else:
         if not a.api_key:
             sys.exit("need --api-key (or --rclone-json)")
@@ -483,8 +483,13 @@ def cmd_build(a):
         m["faces"] += pp["faces"]
         m["photos"] |= set(pp["photos"])
 
+    # Photos deleted from Drive drop out of every person (and people left with none disappear).
+    linked = {i for i, p in enumerate(photos) if drive.get(p["path"])} if drive else set(range(len(photos)))
     out_people = []
     for m in merged.values():
+        m["photos"] &= linked
+        if not m["photos"]:
+            continue
         E = dequant([fmap[f] for f in m["faces"]])
         ex = exemplars(E, a.exemplars)
         qs = [q8(v) for v in ex]
@@ -501,6 +506,10 @@ def cmd_build(a):
         "photos": [[p["path"], drive.get(p["path"]), p["w"], p["h"]] for p in photos],
         "people": out_people,
     }
+    # Optional couple/celebration settings; kept in work/ so names stay out of the public repo.
+    wedding = Path(a.wedding) if a.wedding else work / "wedding.json"
+    if wedding.exists():
+        index["wedding"] = json.loads(wedding.read_text(encoding="utf-8"))
     passphrase = a.passphrase or os.environ.get("PHOTORGANIZE_PASSPHRASE")
     if not passphrase:
         sys.exit("need --passphrase or PHOTORGANIZE_PASSPHRASE")
@@ -680,6 +689,7 @@ def main():
         p.add_argument("--passphrase", help="guests type this to unlock (or env PHOTORGANIZE_PASSPHRASE)")
         p.add_argument("--title", default="Our Wedding")
         p.add_argument("--exemplars", type=int, default=5)
+        p.add_argument("--wedding", help="couple/celebration settings JSON (default: WORK/wedding.json if present)")
         p.add_argument("--out", default=str(ROOT / "docs" / "data" / "index.enc"))
 
     p = sub.add_parser("shrink", help="report folder size / write a compressed copy that fits your Drive")

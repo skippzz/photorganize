@@ -67,7 +67,36 @@ id,name,photos
 9,-,15        ← "-" hides this ID (waiter, stranger)
 ```
 
-Then run `python photorganize.py build --passphrase portakal2026`, then commit and push. Guests can also tap **"I know who this is"** on an unnamed `#ID` to send you a name.
+Then run `python photorganize.py build --passphrase portakal2026`, then commit and push. Guests can also tap **"I know who this is"** on an unnamed `#ID`, type the name, pick who to tell (`contacts` below) and send a ready-made WhatsApp message.
+
+## 4b. Couple extras (optional)
+
+Put `work/wedding.json` next to `names.csv` and rebuild. It goes inside the encrypted index, so names never land in the repo:
+
+```json
+{
+  "couple": ["İdil", "Ege"],
+  "couple_ids": [1, 2],
+  "date": "2026-09-26",
+  "from": "Bora",
+  "message": "Tebrikler! Ömür boyu mutluluklar.",
+  "contacts": ["İdil", "Ege", "Bora"]
+}
+```
+
+This adds a confetti welcome with the couple and your message (once per phone per build, replay by tapping the 💍 line), a "married for N days" line, a card with every photo of the two together, a "Beni şaşırt" random-photo button, and "most often with" chips on each person's page.
+
+## Removing photos
+
+Delete them from the Drive folder, then refresh the Drive mapping and rebuild (seconds, no rescan):
+
+```
+rclone lsjson -R gdrive:fotiler_web > work/listing.json
+python photorganize.py drive --rclone-json work/listing.json
+python photorganize.py build --passphrase portakal2026
+```
+
+Removed photos disappear from every person and from the counts. Until you rebuild, the site just hides any photo Drive no longer serves.
 
 ## 5. Publish
 
