@@ -12,21 +12,25 @@ const DST = [[38.2946, 51.6963], [73.5318, 51.5014], [56.0252, 71.7366], [41.549
 
 let sessions = null;
 
+// Streams a model with progress. Content-Length may be the *compressed* size (GitHub Pages gzips),
+// so chunks are collected rather than written into a pre-sized buffer.
 async function fetchModel(url, onProgress) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`model ${url}: ${res.status}`);
-  const total = +res.headers.get('content-length') || 0;
-  if (!res.body || !total) return new Uint8Array(await res.arrayBuffer());
+  if (!res.body) return new Uint8Array(await res.arrayBuffer());
   const reader = res.body.getReader();
-  const buf = new Uint8Array(total);
+  const chunks = [];
   let got = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    buf.set(value, got);
+    chunks.push(value);
     got += value.length;
-    onProgress?.(got, total);
+    onProgress?.(got);
   }
+  const buf = new Uint8Array(got);
+  let off = 0;
+  for (const c of chunks) { buf.set(c, off); off += c.length; }
   return buf;
 }
 
@@ -34,7 +38,7 @@ export async function loadModels(onProgress) {
   if (sessions) return sessions;
   const sizes = { det: 2524817, rec: 13616099 };
   const got = { det: 0, rec: 0 };
-  const report = () => onProgress?.((got.det + got.rec) / (sizes.det + sizes.rec));
+  const report = () => onProgress?.(Math.min(1, (got.det + got.rec) / (sizes.det + sizes.rec)));
   const [det, rec] = await Promise.all([
     fetchModel('models/det_500m.onnx', (g) => { got.det = g; report(); }),
     fetchModel('models/w600k_mbf.onnx', (g) => { got.rec = g; report(); }),

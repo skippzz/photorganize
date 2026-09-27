@@ -1,5 +1,5 @@
 // App shell + models cached for offline/fast reopen. The index is network-first so rebuilds show up.
-const VERSION = 'po-v2';
+const VERSION = 'po-v3';
 const SHELL = ['./', 'index.html', 'style.css', 'js/app.js', 'js/crypto.js', 'js/face.js', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', (e) => {

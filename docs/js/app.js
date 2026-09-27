@@ -410,6 +410,15 @@ async function viewSelfie() {
     results,
   );
 
+  // Camera and models start together; the camera shows while models download.
+  const camera = navigator.mediaDevices?.getUserMedia
+    ? navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 } }, audio: false })
+      .then((st) => {
+        if (!video.isConnected) { st.getTracks().forEach((t) => t.stop()); return false; } // left the page meanwhile
+        stream = st; video.srcObject = st; return true;
+      }).catch(() => false)
+    : Promise.resolve(false);
+
   try {
     face ??= await import('./face.js');
     await face.loadModels((f) => { bar.value = f; });
@@ -418,13 +427,11 @@ async function viewSelfie() {
     return;
   }
   bar.remove();
-  snap.disabled = pick.disabled = false;
-  status.textContent = 'Look at the camera, good light, no sunglasses.';
-
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 } }, audio: false });
-    video.srcObject = stream;
-  } catch {
+  pick.disabled = false;
+  if (await camera) {
+    snap.disabled = false;
+    status.textContent = 'Look at the camera, good light, no sunglasses.';
+  } else {
     video.parentElement.remove();
     snap.remove();
     status.textContent = 'No camera access. Choose a photo of yourself instead.';
