@@ -542,6 +542,118 @@ def encrypt(data, passphrase):
     return MAGIC + salt + iv + struct.pack(">I", ITER) + AESGCM(key).encrypt(iv, data, None)
 
 
+
+# ---------------------------------------------------------------- shrink (fit photos into Drive quota)
+
+RAW_EXTS = {".cr2", ".cr3", ".nef", ".arw", ".dng", ".raf", ".orf", ".rw2"}
+VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mts", ".m4v", ".3gp"}
+PRESETS = [(3000, 85), (2560, 82), (2048, 80), (1600, 80)]
+
+
+def shrink_one(job):
+    """Resize one photo to max_side and re-encode as JPEG, keeping EXIF (date taken etc.) and colour profile.
+    Returns (in_bytes, out_bytes, error). With dst=None only measures (for estimates)."""
+    src, dst, max_side, quality = job
+    import io
+    import shutil
+    try:
+        in_size = os.path.getsize(src)
+        with Image.open(src) as im:
+            small_enough = max(im.size) <= max_side and im.format == "JPEG"
+            if small_enough:  # never upscale or re-encode an already small JPEG
+                if dst:
+                    shutil.copy2(src, dst)
+                return in_size, in_size, None
+            exif = im.getexif()
+            icc = im.info.get("icc_profile")
+            im = ImageOps.exif_transpose(im).convert("RGB")
+            im.thumbnail((max_side, max_side), Image.LANCZOS)
+            if 0x0112 in exif:
+                del exif[0x0112]  # orientation already applied
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=quality, optimize=True, progressive=True,
+                    exif=exif.tobytes(), icc_profile=icc)
+        if dst:
+            Path(dst).write_bytes(buf.getvalue())
+            st = os.stat(src)
+            os.utime(dst, (st.st_atime, st.st_mtime))
+        return in_size, buf.tell(), None
+    except Exception as ex:
+        return os.path.getsize(src) if os.path.exists(src) else 0, 0, f"{src}: {ex}"
+
+
+def gb(n):
+    return f"{n / 1e9:.2f} GB"
+
+
+def cmd_shrink(a):
+    from concurrent.futures import ProcessPoolExecutor
+    import random
+    src = Path(a.src).resolve()
+    all_files = [p for p in src.rglob("*") if p.is_file()]
+    by_ext = {}
+    for p in all_files:
+        e = by_ext.setdefault(p.suffix.lower() or "(none)", [0, 0])
+        e[0] += 1
+        e[1] += p.stat().st_size
+    print(f"{src}: {len(all_files)} files, {gb(sum(v[1] for v in by_ext.values()))}")
+    for ext, (n, size) in sorted(by_ext.items(), key=lambda kv: -kv[1][1]):
+        note = " (photo)" if ext in EXTS else " (RAW: skipped, export JPEGs)" if ext in RAW_EXTS else \
+            " (video: skipped)" if ext in VIDEO_EXTS else " (skipped)"
+        print(f"  {ext:8} {n:6}  {gb(size):>10}{note}")
+    photos = sorted(p for p in all_files if p.suffix.lower() in EXTS and not p.name.startswith("."))
+    if not photos:
+        sys.exit("no photos found")
+    in_total = sum(p.stat().st_size for p in photos)
+
+    if a.estimate or not a.dst:
+        sample = random.Random(0).sample(photos, min(40, len(photos)))
+        sample_in = sum(p.stat().st_size for p in sample)
+        print(f"\nEstimate from {len(sample)} sample photos ({len(photos)} photos, {gb(in_total)} now):")
+        with ProcessPoolExecutor() as ex:
+            for side, q in PRESETS:
+                res = list(ex.map(shrink_one, [(str(p), None, side, q) for p in sample]))
+                ratio = sum(r[1] for r in res) / max(1, sample_in)
+                est = in_total * ratio
+                fit = "fits" if est <= a.budget_gb * 1e9 else "too big"
+                print(f"  --max-side {side} --quality {q}:  ~{gb(est)}  ({fit} in {a.budget_gb:g} GB)")
+        print("\nThen: python photorganize.py shrink SRC DST --max-side N --quality Q")
+        return
+
+    dst = Path(a.dst).resolve()
+    if dst == src or src in dst.parents:
+        sys.exit("DST must be outside SRC")
+    jobs, seen = [], set()
+    for p in photos:
+        rel = p.relative_to(src)
+        out = (dst / rel).with_suffix(".jpg")
+        if out.as_posix().lower() in seen:  # IMG_1.heic + IMG_1.jpg in one folder
+            out = (dst / rel).with_name(p.name + ".jpg")
+        seen.add(out.as_posix().lower())
+        if out.exists() and out.stat().st_mtime >= p.stat().st_mtime - 1 and out.stat().st_size > 0:
+            continue  # done in a previous run
+        out.parent.mkdir(parents=True, exist_ok=True)
+        jobs.append((str(p), str(out), a.max_side, a.quality))
+    print(f"\nShrinking {len(jobs)} photos ({len(photos) - len(jobs)} already done) -> {dst}")
+    t0, done, tin, tout, errs = time.time(), 0, 0, 0, []
+    with ProcessPoolExecutor() as ex:
+        for i, (bi, bo, err) in enumerate(ex.map(shrink_one, jobs, chunksize=4), 1):
+            tin += bi
+            tout += bo
+            if err:
+                errs.append(err)
+            if i % 100 == 0 or i == len(jobs):
+                el = time.time() - t0
+                print(f"  {i}/{len(jobs)}  {gb(tin)} -> {gb(tout)}  eta {(len(jobs) - i) * el / i / 60:.1f} min", flush=True)
+    out_total = sum(p.stat().st_size for p in dst.rglob("*.jpg"))
+    print(f"\nDone: {gb(in_total)} -> {gb(out_total)} in {dst}"
+          f"  ({'fits' if out_total <= a.budget_gb * 1e9 else 'still over'} {a.budget_gb:g} GB)")
+    for e in errs[:20]:
+        print("  !", e, file=sys.stderr)
+    if errs:
+        print(f"  {len(errs)} files failed (listed above)", file=sys.stderr)
+
+
 # ---------------------------------------------------------------- cli
 
 def main():
@@ -570,6 +682,13 @@ def main():
         p.add_argument("--exemplars", type=int, default=5)
         p.add_argument("--out", default=str(ROOT / "docs" / "data" / "index.enc"))
 
+    p = sub.add_parser("shrink", help="report folder size / write a compressed copy that fits your Drive")
+    p.add_argument("src", help="original photo folder (never modified)")
+    p.add_argument("dst", nargs="?", help="output folder; omit to only print a size estimate")
+    p.add_argument("--max-side", type=int, default=2560, help="longest side in px (default 2560)")
+    p.add_argument("--quality", type=int, default=82, help="JPEG quality (default 82)")
+    p.add_argument("--budget-gb", type=float, default=5, help="Drive space you have (default 5)")
+    p.add_argument("--estimate", action="store_true", help="only estimate, even if dst given")
     p = sub.add_parser("scan", help="detect + embed faces (resumable)")
     scan_args(p)
     p = sub.add_parser("cluster", help="group faces into person IDs")
@@ -594,7 +713,7 @@ def main():
             cmd_drive(a)
         cmd_build(a)
     else:
-        {"scan": cmd_scan, "cluster": cmd_cluster, "drive": cmd_drive, "build": cmd_build}[a.cmd](a)
+        {"shrink": cmd_shrink, "scan": cmd_scan, "cluster": cmd_cluster, "drive": cmd_drive, "build": cmd_build}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,15 @@ local photos ──scan──▶ faces ──cluster──▶ person IDs ──b
 guest phone:  passphrase ▶ decrypt index ▶ selfie ▶ on-device embedding ▶ nearest person ▶ Drive photos
 ```
 
+## 0. Shrink to fit your Drive (optional)
+
+```bash
+python indexer/photorganize.py shrink D:\fotiler                  # size report + estimates per preset
+python indexer/photorganize.py shrink D:\fotiler D:\fotiler_web   # write compressed copy (default 2560px, q82)
+```
+
+The originals are never touched. The copy keeps EXIF (date taken, camera), applies rotation, and keeps the folder structure. Photos that are already small JPEGs are copied as is. It's resumable. RAW and video files are skipped. **Upload and scan the compressed folder**, so the paths match between scan and Drive. 2560px is sharp on any phone or laptop and prints fine up to about 20×30 cm. Keep the originals offline for anyone who wants full resolution.
+
 ## 1. Put the photos on Drive
 
 Upload the folder (subfolders are fine) to Google Drive. Set **Share → General access → Anyone with the link → Viewer**.
