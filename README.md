@@ -53,8 +53,8 @@ Open `work/people.html`. It's a contact sheet with each person ID, their face cr
 ```csv
 id,name,photos
 1,Bora,412
-2,Ayşe,380
-7,Ayşe,21     ← same name as #2 → merged into one person (fixes a split person)
+2,Yaren,380
+7,Yaren,21     ← same name as #2 → merged into one person (fixes a split person)
 9,-,15        ← "-" hides this ID (waiter, stranger)
 ```
 
