@@ -1,0 +1,6 @@
+onnxruntime>=1.16
+numpy>=1.23
+opencv-python-headless>=4.7
+pillow>=9.2
+cryptography>=41
+# optional: pillow-heif  (iPhone HEIC photos)
