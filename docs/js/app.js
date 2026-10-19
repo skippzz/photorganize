@@ -267,6 +267,7 @@ function viewHome() {
   const cp = couple();
   const other = new Set(cp?.[1].photos);
   const together = cp ? cp[0].photos.filter((x) => other.has(x)).length : 0;
+  const nMoments = moments().length;
   $view.replaceChildren(
     w?.couple && w.date ? h('button', { class: 'married', onclick: celebrate, title: 'Kutlamayı tekrar oynat' }, `💍 ${coupleName()} · ${marriedFor(w.date)}`) : '',
     cp ? h('a', { class: 'card action couple', href: `#/p/${cp[0].id}?with=${cp[1].id}` },
@@ -280,6 +281,8 @@ function viewHome() {
       h('div', {}, h('div', { class: 'big' }, 'Browse people'), h('div', { class: 'muted' }, `${idx.people.filter((p) => p.name).length} named, ${idx.people.length} total`))),
     h('a', { class: 'card action', href: '#/all' }, h('span', { class: 'icon' }, '🖼️'),
       h('div', {}, h('div', { class: 'big' }, 'All photos'), h('div', { class: 'muted' }, `${linked} photos`))),
+    nMoments ? h('a', { class: 'card action', href: '#/moments' }, h('span', { class: 'icon' }, '✨'),
+      h('div', {}, h('div', { class: 'big' }, 'Detaylar & anlar'), h('div', { class: 'muted' }, `${nMoments} fotoğraf · süslemeler, mekân, manzara`))) : '',
     h('button', { class: 'card action', onclick: shuffle }, h('span', { class: 'icon' }, '🎲'),
       h('div', {}, h('div', { class: 'big' }, 'Beni şaşırt'), h('div', { class: 'muted' }, 'Rastgele fotoğraflar, kaydırdıkça yenisi gelir.'))),
     h('p', { class: 'foot' }, h('button', { class: 'link', onclick() { store.set('pass', null); store.set('me', null); idx = null; location.hash = ''; route(); } }, 'Lock')),
@@ -385,6 +388,14 @@ function suggestName(p) {
 function viewAll() {
   const all = idx.photos.map((_, i) => i);
   $view.replaceChildren(h('div', { class: 'bar' }, h('a', { href: '#/', class: 'back' }, '←'), h('h2', {}, 'All photos')), grid(all));
+}
+
+// Photos where no face was detected at all (decor, venue, scenery, people from behind).
+// photos[i][4] is the detected-face count; older indexes lack it, so the album stays hidden.
+const moments = () => idx.photos.map((_, i) => i).filter((i) => idx.photos[i][1] && idx.photos[i][4] === 0);
+
+function viewMoments() {
+  $view.replaceChildren(h('div', { class: 'bar' }, h('a', { href: '#/', class: 'back' }, '←'), h('h2', {}, 'Detaylar & anlar')), grid(moments()));
 }
 
 // Chunked lazy grid; tapping opens the lightbox.
@@ -656,6 +667,7 @@ async function route() {
   else if (path === '/people') viewPeople();
   else if (path === '/selfie') viewSelfie();
   else if (path === '/all') viewAll();
+  else if (path === '/moments') viewMoments();
   else viewHome();
 }
 

@@ -469,8 +469,12 @@ def cmd_build(a):
     if not drive:
         print("warning: no drive.json -- guests will not be able to see photos", file=sys.stderr)
     names = read_names(work / "names.csv")
-    _, faces = load_scan(work)
+    scan_photos, faces = load_scan(work)
     fmap = {f["id"]: f for f in faces}
+    # Detected faces per photo (any size, grouped or not); 0 = details/scenery for the "moments" album.
+    face_count = {p["path"]: 0 for p in scan_photos}
+    for f in faces:
+        face_count[scan_photos[f["p"]]["path"]] += 1
 
     # Merge IDs sharing a name; drop hidden ('-').
     merged = {}
@@ -504,7 +508,7 @@ def cmd_build(a):
 
     index = {
         "v": 1, "title": a.title, "created": time.strftime("%Y-%m-%d"),
-        "photos": [[p["path"], drive.get(p["path"]), p["w"], p["h"]] for p in photos],
+        "photos": [[p["path"], drive.get(p["path"]), p["w"], p["h"], face_count.get(p["path"], 0)] for p in photos],
         "people": out_people,
     }
     # Optional couple/celebration settings; kept in work/ so names stay out of the public repo.
