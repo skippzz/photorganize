@@ -368,7 +368,8 @@ def cmd_cluster(a):
           f"(covering {len({p for pp in out for p in pp['photos']})} photos)")
 
     names = read_names(work / "names.csv")
-    with (work / "names.csv").open("w", newline="") as f:
+    # UTF-8 explicitly: Windows' default code page can't store names like "İdil".
+    with (work / "names.csv").open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["id", "name", "photos"])
         for pp in out:
